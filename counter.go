@@ -1,7 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -11,8 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi"
-	"github.com/wcharczuk/go-chart"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	charts "github.com/vicanso/go-charts/v2"
 )
 
 type metric struct {
@@ -41,10 +44,17 @@ type status struct {
 var data map[string]*metric
 var globalLock sync.Mutex
 
+//go:embed Readme.md
+var readme []byte
+
 const persistenceInterval = 30 * time.Second
 const lruInterval = 5 * time.Minute
 const retentionDuration = time.Duration(6 * time.Hour)
 const dataDir = "data"
+
+func getIndex(w http.ResponseWriter, r *http.Request) {
+	w.Write(readme)
+}
 
 func getMetricList(w http.ResponseWriter, r *http.Request) {
 	globalLock.Lock()
@@ -90,7 +100,6 @@ func getMetric(w http.ResponseWriter, r *http.Request) {
 func getMetricChart(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
 	dimensionName := chi.URLParam(r, "dimensionName")
-	zoneName, _ := time.Now().Zone()
 
 	// Find the requested data
 	globalLock.Lock()
@@ -107,16 +116,17 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 		sort.Strings(keys)
 
 		// Build up dataset
-		XValues := make([]time.Time, 0)
+		XValues := make([]string, 0)
 		YValues := make([]float64, 0)
 		for _, k := range keys {
 			v := m.datapoints[k]
-			t, err := time.Parse("2006-01-02 15:04 MST", fmt.Sprintf("%s %s", k, zoneName))
+
+			// Reformat date
+			t, err := time.Parse("2006-01-02 15:04", k)
 			if err != nil {
-				fmt.Println("Could not parse time value")
-				continue
+				panic(err)
 			}
-			XValues = append(XValues, t)
+			XValues = append(XValues, t.Format("03:04 PM"))
 
 			switch dimensionName {
 			case "sum":
@@ -129,21 +139,39 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Generate chart
-		graph := chart.Chart{
-			XAxis: chart.XAxis{
-				ValueFormatter: chart.TimeMinuteValueFormatter,
+		p, err := charts.LineRender(
+			[][]float64{YValues},
+			charts.TitleOptionFunc(charts.TitleOption{
+				Text: metricName,
+				Left: "50%",
+			}),
+			charts.XAxisOptionFunc(charts.XAxisOption{
+				Data:        XValues,
+				BoundaryGap: charts.FalseFlag(),
+				FontSize:    10,
+			}),
+			charts.YAxisOptionFunc(charts.YAxisOption{
+				FontSize: 10,
+			}),
+			charts.HeightOptionFunc(400),
+			charts.WidthOptionFunc(1024),
+			func(opt *charts.ChartOption) {
+				opt.SymbolShow = charts.FalseFlag()
 			},
-			Series: []chart.Series{
-				chart.TimeSeries{
-					XValues: XValues,
-					YValues: YValues,
-				},
-			},
+		)
+
+		if err != nil {
+			panic(err)
+		}
+
+		buf, err := p.Bytes()
+		if err != nil {
+			panic(err)
 		}
 
 		m.mutex.Unlock()
 		w.Header().Set("Content-Type", "image/png")
-		graph.Render(chart.PNG, w)
+		w.Write(buf)
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		response, err := json.Marshal(error{Error: "Could not find metric"})
@@ -311,11 +339,19 @@ func debugMode() bool {
 func main() {
 	// Set up router
 	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
 	writeBuffer := make(chan map[string]datapoint, 1000)
+	r.Get("/", getIndex)
 	r.Get("/metric", getMetricList)
 	r.Post("/metric", writeMetrics(writeBuffer))
 	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}", getMetric)
 	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}/{dimensionName:[a-z]+}.png", getMetricChart)
+
+	// Parse command line options
+	port := flag.Int("port", 8080, "port on which to listen")
+	flag.Parse()
 
 	// Set up global data store
 	data = make(map[string]*metric)
@@ -331,9 +367,8 @@ func main() {
 	go persist()
 
 	// Start server
-	port := "8080"
-	fmt.Printf("Counter server started on port %s\n", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), r); err != nil {
+	fmt.Printf("Counter server started on port %d\n", *port)
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), r); err != nil {
 		panic(err)
 	}
 }
