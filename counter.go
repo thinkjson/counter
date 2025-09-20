@@ -143,7 +143,6 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 			[][]float64{YValues},
 			charts.TitleOptionFunc(charts.TitleOption{
 				Text: metricName,
-				Left: "50%",
 			}),
 			charts.XAxisOptionFunc(charts.XAxisOption{
 				Data:        XValues,
