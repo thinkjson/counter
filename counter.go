@@ -1,10 +1,13 @@
 package main
 
 import (
-	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -44,17 +47,10 @@ type status struct {
 var data map[string]*metric
 var globalLock sync.Mutex
 
-//go:embed Readme.md
-var readme []byte
-
 const persistenceInterval = 30 * time.Second
 const lruInterval = 5 * time.Minute
 const retentionDuration = time.Duration(6 * time.Hour)
 const dataDir = "data"
-
-func getIndex(w http.ResponseWriter, r *http.Request) {
-	w.Write(readme)
-}
 
 func getMetricList(w http.ResponseWriter, r *http.Request) {
 	globalLock.Lock()
@@ -97,9 +93,18 @@ func getMetric(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func writeBlankPNG(w http.ResponseWriter, width, height int) {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.White}, image.Point{}, draw.Src)
+	png.Encode(w, img)
+}
+
 func getMetricChart(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
 	dimensionName := chi.URLParam(r, "dimensionName")
+	width := 1024
+	height := 400
+	w.Header().Set("Content-Type", "image/png")
 
 	// Find the requested data
 	globalLock.Lock()
@@ -134,15 +139,23 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 			case "count":
 				YValues = append(YValues, float64(v.Count))
 			default:
+				dimensionName = "average"
 				YValues = append(YValues, v.Average)
 			}
+		}
+		m.mutex.Unlock()
+
+		// If metric is empty, return a blank image
+		if len(XValues) == 0 {
+			writeBlankPNG(w, width, height)
+			return
 		}
 
 		// Generate chart
 		p, err := charts.LineRender(
 			[][]float64{YValues},
 			charts.TitleOptionFunc(charts.TitleOption{
-				Text: metricName,
+				Text: fmt.Sprintf("%s (%s)", metricName, dimensionName),
 			}),
 			charts.XAxisOptionFunc(charts.XAxisOption{
 				Data:        XValues,
@@ -152,8 +165,8 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 			charts.YAxisOptionFunc(charts.YAxisOption{
 				FontSize: 10,
 			}),
-			charts.HeightOptionFunc(400),
-			charts.WidthOptionFunc(1024),
+			charts.HeightOptionFunc(height),
+			charts.WidthOptionFunc(width),
 			func(opt *charts.ChartOption) {
 				opt.SymbolShow = charts.FalseFlag()
 			},
@@ -168,16 +181,9 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 
-		m.mutex.Unlock()
-		w.Header().Set("Content-Type", "image/png")
 		w.Write(buf)
 	} else {
-		w.Header().Set("Content-Type", "application/json")
-		response, err := json.Marshal(error{Error: "Could not find metric"})
-		if err != nil {
-			panic(err)
-		}
-		w.Write(response)
+		writeBlankPNG(w, width, height)
 	}
 }
 
@@ -202,10 +208,24 @@ func writeMetrics(writeBuffer chan map[string]datapoint) func(w http.ResponseWri
 	}
 }
 
+func incrementMetric(m *metric, d datapoint) {
+	timeKey := time.Now().Format("2006-01-02 15:04")
+	m.mutex.Lock()
+	if point, ok := m.datapoints[timeKey]; ok {
+		point.Count += d.Count
+		point.Value += d.Value
+		point.Average = point.Value / float64(point.Count)
+		m.datapoints[timeKey] = point
+	} else {
+		point := datapoint{Count: d.Count, Value: d.Value, Average: d.Value / float64(d.Count)}
+		m.datapoints[timeKey] = point
+	}
+	m.mutex.Unlock()
+}
+
 func appendMetrics(writeBuffer chan map[string]datapoint) {
 	for {
 		sample := <-writeBuffer
-		timeKey := time.Now().Format("2006-01-02 15:04")
 		for metricName, d := range sample {
 			globalLock.Lock()
 			m, ok := data[metricName]
@@ -218,23 +238,18 @@ func appendMetrics(writeBuffer chan map[string]datapoint) {
 
 			// Increment point if it exists, otherwise create a new point
 			if ok {
-				m.mutex.Lock()
-				if point, ok := m.datapoints[timeKey]; ok {
-					point.Count += d.Count
-					point.Value += d.Value
-					point.Average = point.Value / float64(point.Count)
-					m.datapoints[timeKey] = point
-				} else {
-					point := datapoint{Count: d.Count, Value: d.Value, Average: d.Value / float64(d.Count)}
-					m.datapoints[timeKey] = point
-				}
-				m.mutex.Unlock()
+				incrementMetric(m, d)
 			} else {
 				globalLock.Lock()
 				data[metricName] = &metric{
 					datapoints: make(map[string]datapoint, 0),
 				}
+				m, ok := data[metricName]
 				globalLock.Unlock()
+
+				if ok {
+					incrementMetric(m, d)
+				}
 			}
 		}
 	}
@@ -338,11 +353,11 @@ func debugMode() bool {
 func main() {
 	// Set up router
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+	// r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	writeBuffer := make(chan map[string]datapoint, 1000)
-	r.Get("/", getIndex)
+	r.Mount("/", uiResource{}.Routes())
 	r.Get("/metric", getMetricList)
 	r.Post("/metric", writeMetrics(writeBuffer))
 	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}", getMetric)
