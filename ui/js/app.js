@@ -47,10 +47,10 @@ function renderMetrics(container, metrics) {
 
   container.appendChild(frag);
 
-  setInterval(() => refreshMetrics(container, metrics), refreshInterval);
+  setInterval(() => refreshMetrics(metrics), refreshInterval);
 }
 
-function refreshMetrics(container, metrics) {
+function refreshMetrics(metrics) {
   const now = new Date().valueOf();
   for (const name of metrics) {
     for (const op of ops) {

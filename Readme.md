@@ -1,11 +1,18 @@
 # Counter
 
-Tracks sum, count, and average for any arbitrary metrics that you send to it.
+Fast, scalable, simple to deploy metrics server that tracks sum, count, and average for any arbitrary metrics that you send to it.
 
 ## Installation
 
 Download the binary for your platform from the [bin directory](../master/bin) to the location where you want it
 to store data, then run it as an unpriviledged user. It will run on port 8080 by default.
+
+## User interface
+
+If you visit the [server root](http://localhost:8080/), you will see a summary of all metrics being tracked
+by the server.
+
+![Image](../master/examples/ui.png?raw=true)
 
 ## API endpoints
 
@@ -37,6 +44,10 @@ The API format is as follows:
 
 Multiple metrics can be sent in a single request, and you can aggregate upstream by including a
 count in your request. Count is optional, and will default to 1.
+
+## Command line options
+
+| --port | Specify the port on which to listen |
 
 ## Purging data
 
