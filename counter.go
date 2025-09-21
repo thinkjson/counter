@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -99,11 +100,43 @@ func writeBlankPNG(w http.ResponseWriter, width, height int) {
 	png.Encode(w, img)
 }
 
+type signedInt interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64
+}
+
+// QueryIntOrDefault returns the query param `name` parsed as T,
+// or `def` if missing/invalid.
+func QueryIntOrDefault[T signedInt](r *http.Request, name string, def T) T {
+	s := r.URL.Query().Get(name)
+	if s == "" {
+		return def
+	}
+
+	// choose appropriate bit size based on T
+	bits := 64
+	switch any(def).(type) {
+	case int8:
+		bits = 8
+	case int16:
+		bits = 16
+	case int32:
+		bits = 32
+	case int, int64:
+		bits = 64
+	}
+
+	n, err := strconv.ParseInt(s, 10, bits)
+	if err != nil {
+		return def
+	}
+	return T(n)
+}
+
 func getMetricChart(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
 	dimensionName := chi.URLParam(r, "dimensionName")
-	width := 1024
-	height := 400
+	width := QueryIntOrDefault(r, "width", 1024)
+	height := QueryIntOrDefault(r, "height", 400)
 	w.Header().Set("Content-Type", "image/png")
 
 	// Find the requested data

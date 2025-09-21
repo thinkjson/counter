@@ -10,8 +10,8 @@ import (
 //go:embed ui/index.html
 var index []byte
 
-//go:embed ui/css/simple-grid.min.css
-var grid []byte
+//go:embed ui/css/vendor.css
+var vendor []byte
 
 //go:embed ui/css/style.css
 var css []byte
@@ -24,7 +24,7 @@ type uiResource struct{}
 func (rs uiResource) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/", rs.Index)
-	r.Get("/css/simple-grid.min.css", rs.Grid)
+	r.Get("/css/vendor.css", rs.Vendor)
 	r.Get("/css/style.css", rs.CSS)
 	r.Get("/js/app.js", rs.JS)
 	return r
@@ -35,9 +35,9 @@ func (rs uiResource) Index(w http.ResponseWriter, r *http.Request) {
 	w.Write(index)
 }
 
-func (rs uiResource) Grid(w http.ResponseWriter, r *http.Request) {
+func (rs uiResource) Vendor(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/css")
-	w.Write(grid)
+	w.Write(vendor)
 }
 
 func (rs uiResource) CSS(w http.ResponseWriter, r *http.Request) {
