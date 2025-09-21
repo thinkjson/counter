@@ -14,7 +14,6 @@ async function loadMetrics(cb) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const metrics = await res.json();
-    console.log({ metrics });
 
     cb(container, metrics.metrics);
   } catch (err) {
@@ -59,9 +58,6 @@ function refreshMetrics(container, metrics) {
       img.src = `/metric/${encodeURIComponent(
         name
       )}/${op}.png?t=${now}&width=${width}&height=${height}`;
-
-      wrapper.appendChild(img);
-      frag.appendChild(wrapper);
     }
   }
 }
