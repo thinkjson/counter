@@ -47,6 +47,8 @@ count in your request. Count is optional, and will default to 1.
 
 ## Command line options
 
+| Flag   | Description                         |
+| ------ | ----------------------------------- |
 | --port | Specify the port on which to listen |
 
 ## Purging data
