@@ -393,8 +393,8 @@ func main() {
 	r.Mount("/", uiResource{}.Routes())
 	r.Get("/metric", getMetricList)
 	r.Post("/metric", writeMetrics(writeBuffer))
-	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}", getMetric)
-	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}/{dimensionName:[a-z]+}.png", getMetricChart)
+	r.Get("/metric/{metricName:[a-zA-Z0-9-._]+}", getMetric)
+	r.Get("/metric/{metricName:[a-zA-Z0-9-._]+}/{dimensionName:[a-z]+}.png", getMetricChart)
 
 	// Parse command line options
 	port := flag.Int("port", 8080, "port on which to listen")
